@@ -3,11 +3,13 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter, usePathname } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { firestoreDB } from "../../FirebaseConfig";
 
 import { WorkspaceStore, Workspace } from "../../storage/workspaceStore";
 
 export default function HomeScreen() {
-  /* -------------------- hooks (TOP LEVEL) -------------------- */
+  
   const { signOut } = useAuth();
   const { user } = useUser();
   const router = useRouter();
@@ -17,15 +19,28 @@ export default function HomeScreen() {
   const [recent, setRecent] = useState<Workspace[]>([]);
   const [signingOut, setSigningOut] = useState(false);
 
-  /* -------------------- effects -------------------- */
   useEffect(() => {
-    WorkspaceStore.count().then(setIdeaCount);
-    WorkspaceStore.getAll().then((all) => {
+    if (!user?.id) return;
+
+    // Ensure user doc exists in Firestore
+    const userRef = doc(firestoreDB, "users", user.id);
+    setDoc(
+      userRef,
+      {
+        username: user.username || user.firstName || "",
+        email: user.primaryEmailAddress?.emailAddress || "",
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    WorkspaceStore.count(user.id).then(setIdeaCount);
+    WorkspaceStore.getAll(user.id).then((all) => {
       setRecent(all.slice(0, 3));
     });
-  }, [pathname]);
+  }, [pathname, user?.id]);
 
-  /* -------------------- handlers -------------------- */
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
@@ -40,7 +55,6 @@ export default function HomeScreen() {
 
   const greeting = user?.firstName || user?.username || "there";
 
-  /* -------------------- UI -------------------- */
   return (
     <LinearGradient
       colors={["#070A12", "#0A1020", "#070A12"]}
@@ -92,7 +106,7 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        {/* Recent Activity */}
+      
         <Text style={styles.sectionTitle}>Recent Activity</Text>
         {recent.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -102,24 +116,25 @@ export default function HomeScreen() {
           recent.map((item) => (
             <Pressable
               key={item.id}
-              style={styles.actionCard}
+              style={styles.recentStrip}
               onPress={() =>
                 router.push({
                   pathname: "/workspace" as any,
                   params: {
                     idea: item.idea,
                     category: item.category,
+                    id: item.id,
                   },
                 })
               }
             >
-              <Text style={styles.actionText}>{item.idea}</Text>
-              <Text style={{ opacity: 0.5 }}>{item.category}</Text>
+              <Text style={styles.recentStripTitle}>{item.idea}</Text>
+              <Text style={styles.recentStripCategory}>{item.category}</Text>
             </Pressable>
           ))
         )}
 
-        {/* Categories */}
+        
         <Text style={styles.sectionTitle}>CATEGORIES</Text>
         <View style={styles.actionGrid}>
           {["Startup", "Research", "Content Creation", "Growth"].map(
@@ -144,7 +159,7 @@ export default function HomeScreen() {
   );
 }
 
-/* -------------------- styles -------------------- */
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: {
@@ -236,7 +251,7 @@ const styles = StyleSheet.create({
     width: "47%",
     backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
-    borderColor: "rgba(109,94,246,0.15)",
+    borderColor: "rgba(253, 251, 242, 0.94)",
     borderRadius: 16,
     paddingVertical: 22,
     alignItems: "center",
@@ -245,6 +260,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "600",
     color: "#EAF0FF",
+  },
+  recentStrip: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderWidth: 1,
+    borderColor: "rgba(253, 251, 242, 0.15)",
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    marginBottom: 10,
+  },
+  recentStripTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#EAF0FF",
+  },
+  recentStripCategory: {
+    fontSize: 12,
+    color: "rgba(234,240,255,0.45)",
   },
   emptyCard: {
     backgroundColor: "rgba(255,255,255,0.04)",
