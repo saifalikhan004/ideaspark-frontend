@@ -20,7 +20,7 @@ export type Activity = {
 
 export const ActivityStore = {
   async log(userId: string, activity: Omit<Activity, "userId" | "timestamp">) {
-    await addDoc(collection(firestoreDB, "activity"), {
+    await addDoc(collection(firestoreDB, "users", userId, "activity"), {
       ...activity,
       userId,
       timestamp: serverTimestamp(),
@@ -29,13 +29,11 @@ export const ActivityStore = {
 
   async getRecent(userId: string, count = 20): Promise<Activity[]> {
     const q = query(
-      collection(firestoreDB, "activity"),
+      collection(firestoreDB, "users", userId, "activity"),
       orderBy("timestamp", "desc"),
       limit(count)
     );
     const snap = await getDocs(q);
-    return snap.docs
-      .filter((d) => d.data().userId === userId)
-      .map((d) => ({ id: d.id, ...d.data() } as Activity));
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Activity));
   },
 };

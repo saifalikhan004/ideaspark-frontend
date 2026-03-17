@@ -1,9 +1,9 @@
-import React from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useFocusEffect } from "expo-router";
-import { Workspace, WorkspaceStore } from "../../storage/workspaceStore";
 import { useUser } from "@clerk/clerk-expo";
+import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect, useRouter } from "expo-router";
+import React from "react";
+import { Pressable, ScrollView, Text } from "react-native";
+import { Workspace, WorkspaceStore } from "../../storage/workspaceStore";
 
 export default function RecentScreen() {
   const router = useRouter();
@@ -13,9 +13,14 @@ export default function RecentScreen() {
   useFocusEffect(
     React.useCallback(() => {
       if (user?.id) {
-        WorkspaceStore.getAll(user.id).then(setItems);
+        WorkspaceStore.getAll(user.id)
+          .then(setItems)
+          .catch((error) => {
+            console.error("Recent screen load error:", error);
+            setItems([]);
+          });
       }
-    }, [user?.id])
+    }, [user?.id]),
   );
 
   return (
@@ -53,8 +58,14 @@ export default function RecentScreen() {
                 borderRadius: 12,
               }}
             >
-              <Text style={{ color: "#EAF0FF", fontSize: 14, fontWeight: "600" }}>{w.idea}</Text>
-              <Text style={{ color: "rgba(234,240,255,0.45)", fontSize: 12 }}>{w.category}</Text>
+              <Text
+                style={{ color: "#EAF0FF", fontSize: 14, fontWeight: "600" }}
+              >
+                {w.idea}
+              </Text>
+              <Text style={{ color: "rgba(234,240,255,0.45)", fontSize: 12 }}>
+                {w.category}
+              </Text>
             </Pressable>
           ))
         )}

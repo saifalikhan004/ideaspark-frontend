@@ -1,27 +1,27 @@
-import { WorkspaceStore } from "../storage/workspaceStore";
-import { ChatStore } from "../storage/chatStore";
-import { ActivityStore } from "../storage/activityStore";
-import React, { useMemo, useState, useRef } from "react";
+import { useUser } from "@clerk/clerk-expo";
+import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  View,
-  Platform,
-  KeyboardAvoidingView,
+  View
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect } from "react";
-import { useUser } from "@clerk/clerk-expo";
+import { ActivityStore } from "../storage/activityStore";
+import { ChatStore } from "../storage/chatStore";
+import { WorkspaceStore } from "../storage/workspaceStore";
+import { NotesStore, Note } from "../storage/notesStore";
 
 const BACKEND_URL =
   Platform.OS === "android"
-    ? "http://10.0.2.2:8000"
+    ? "http://192.168.31.195:8000"
     : "http://localhost:8000";
 
 type AIResult = {
@@ -47,124 +47,250 @@ export default function WorkspaceScreen() {
   const initialCategory = (params.category as string) || "General";
   const existingId = params.id as string | undefined;
 
-  
   const [idea, setIdea] = useState(initialIdea);
   const [category] = useState(initialCategory);
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [newNoteText, setNewNoteText] = useState("");
+  const [notesLoading, setNotesLoading] = useState(false);
   const [aiResult, setAiResult] = useState<AIResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [ideaDocId, setIdeaDocId] = useState<string | null>(existingId || null);
   const ideaDocIdRef = useRef<string | null>(existingId || null);
+  const [initReady, setInitReady] = useState(false);
 
   // Chat state
   const [chatMessages, setChatMessages] = useState<ChatMsg[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
-  const chatScrollRef = useRef<ScrollView>(null);
+  const chatScrollRef = useRef<any>(null);
+  const mainScrollRef = useRef<any>(null);
+
+  // Keyboard padding for Android
+  const [keyboardPadding, setKeyboardPadding] = useState(0);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow",
+      (e) => {
+        setKeyboardPadding(e.endCoordinates.height);
+        // Scroll main view to bottom so chat input is visible
+        setTimeout(() => mainScrollRef.current?.scrollToEnd({ animated: true }), 150);
+      }
+    );
+    const hideSub = Keyboard.addListener(
+      Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
+      () => setKeyboardPadding(0)
+    );
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   // Save idea to Firestore on mount & load existing data
   useEffect(() => {
     const init = async () => {
-      if (existingId) {
-        // Reopening existing idea — load chat history
-        setIdeaDocId(existingId);
-        ideaDocIdRef.current = existingId;
-        const msgs = await ChatStore.getMessages(existingId);
-        setChatMessages(msgs.map((m) => ({ role: m.role, content: m.content })));
-      } else {
-        // New idea — save to Firestore
-        const docId = await WorkspaceStore.add(userId, {
-          idea: initialIdea || "Untitled Idea",
-          category: initialCategory,
-        });
-        setIdeaDocId(docId);
-        ideaDocIdRef.current = docId;
-        await ActivityStore.log(userId, {
-          ideaId: docId,
-          ideaTitle: (initialIdea || "Untitled Idea").slice(0, 50),
-          action: "created",
-        });
+      try {
+        if (existingId) {
+          // Reopening existing idea — load chat history, notes, and AI results
+          setIdeaDocId(existingId);
+          ideaDocIdRef.current = existingId;
+          
+          // Load full idea document including refined idea, expansions, action steps
+          const ideaData = await WorkspaceStore.get(userId, existingId);
+          if (ideaData) {
+            console.log("📖 Loaded existing idea:", ideaData);
+            // Set idea text
+            setIdea(ideaData.idea || "");
+            
+            // Set AI results if they exist
+            if (ideaData.refinedIdea) {
+              setAiResult({
+                final_category: ideaData.category || "",
+                sub_category: ideaData.subCategory || "",
+                refined_idea: ideaData.refinedIdea || "",
+                expansions: ideaData.expansions || [],
+                action_steps: ideaData.actionSteps || [],
+              });
+              console.log("✅ AI results loaded");
+            }
+          }
+          
+          // Load chat history
+          const msgs = await ChatStore.getMessages(userId, existingId);
+          setChatMessages(
+            msgs.map((m) => ({ role: m.role, content: m.content })),
+          );
+          
+          // Load notes
+          setNotesLoading(true);
+          const notesList = await NotesStore.getNotes(userId, existingId);
+          setNotes(notesList);
+          setNotesLoading(false);
+        } else {
+          // New idea — save to Firestore
+          const docId = await WorkspaceStore.add(userId, {
+            idea: initialIdea || "Untitled Idea",
+            category: initialCategory,
+          });
+          setIdeaDocId(docId);
+          ideaDocIdRef.current = docId;
+          await ActivityStore.log(userId, {
+            ideaId: docId,
+            ideaTitle: (initialIdea || "Untitled Idea").slice(0, 50),
+            action: "created",
+          });
+        }
+        setInitReady(true);
+      } catch (error) {
+        setInitReady(true);
+        console.error("Workspace init error:", error);
       }
     };
-    init();
+    void init();
   }, []);
 
-  // Save notes to Firestore when they change (debounced)
-  useEffect(() => {
-    const docId = ideaDocIdRef.current;
-    if (!docId) return;
-    const timer = setTimeout(() => {
-      WorkspaceStore.update(docId, { notes });
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [notes, ideaDocId]);
+  // No longer needed - notes are saved individually as documents now
+  const notesWordCount = 0;
 
-  const notesWordCount = useMemo(
-    () => (notes.trim() ? notes.trim().split(/\s+/).length : 0),
-    [notes]
-  );
+  // Notes handlers
+  const handleAddNote = async () => {
+    const text = newNoteText.trim();
+    if (!text) {
+      Alert.alert("Empty note", "Please enter some text for your note.");
+      return;
+    }
+
+    try {
+      setNotesLoading(true);
+      const docId = ideaDocIdRef.current;
+      if (!docId) {
+        Alert.alert("Error", "Idea not ready. Please wait.");
+        return;
+      }
+      await NotesStore.addNote(userId, docId, text);
+      // Reload notes
+      const notesList = await NotesStore.getNotes(userId, docId);
+      setNotes(notesList);
+      setNewNoteText("");
+    } catch (error) {
+      console.error("Error adding note:", error);
+      Alert.alert("Error", "Failed to add note. Please try again.");
+    } finally {
+      setNotesLoading(false);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    Alert.alert("Delete note", "Are you sure?", [
+      { text: "Cancel", onPress: () => {} },
+      {
+        text: "Delete",
+        onPress: async () => {
+          try {
+            setNotesLoading(true);
+            const docId = ideaDocIdRef.current;
+            if (!docId) return;
+            await NotesStore.deleteNote(userId, docId, noteId);
+            // Reload notes
+            const notesList = await NotesStore.getNotes(userId, docId);
+            setNotes(notesList);
+          } catch (error) {
+            console.error("Error deleting note:", error);
+            Alert.alert("Error", "Failed to delete note.");
+          } finally {
+            setNotesLoading(false);
+          }
+        },
+        style: "destructive",
+      },
+    ]);
+  };
+
+  // Wait for DocId
+  const waitForDocId = useCallback(async (): Promise<string | null> => {
+    if (ideaDocIdRef.current) return ideaDocIdRef.current;
+    // Wait up to 5 seconds for init
+    for (let i = 0; i < 50; i++) {
+      await new Promise((r) => setTimeout(r, 100));
+      if (ideaDocIdRef.current) return ideaDocIdRef.current;
+    }
+    return null;
+  }, []);
 
   const handleRefine = async () => {
-  if (!idea.trim()) {
-    Alert.alert("Idea required", "Please enter an idea before refining.");
-    return;
-  }
-
-  try {
-    setLoading(true);
-    setAiResult(null);
-
-    const res = await fetch(`${BACKEND_URL}/idea/`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        idea_text: idea,
-        category: initialCategory, 
-      }),
-    });
-
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(text || "Failed to refine idea");
+    if (!idea.trim()) {
+      Alert.alert("Idea required", "Please enter an idea before refining.");
+      return;
     }
 
-    const data = await res.json();
+    try {
+      setLoading(true);
+      setAiResult(null);
 
-    
-    setAiResult(data);
+      const res = await fetch(`${BACKEND_URL}/idea/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          idea_text: idea,
+          category: initialCategory,
+        }),
+      });
 
-    // Save AI results to Firestore
-    const currentDocId = ideaDocIdRef.current;
-    if (currentDocId) {
-      await WorkspaceStore.update(currentDocId, {
-        idea,
-        refinedIdea: data.refined_idea,
-        subCategory: data.sub_category,
-        expansions: data.expansions,
-        actionSteps: data.action_steps,
-        structureType: data.structure_type || null,
-      });
-      await ActivityStore.log(userId, {
-        ideaId: currentDocId,
-        ideaTitle: idea.slice(0, 50),
-        action: "refined",
-      });
-    } else {
-      console.warn("No ideaDocId available to save AI results");
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to refine idea");
+      }
+
+      const data = await res.json();
+
+      setAiResult(data);
+
+      // Save AI results to Firestore — wait for docId if init hasn't finished
+      const currentDocId = await waitForDocId();
+      if (currentDocId) {
+        console.log("Saving refined idea to Firestore...", {
+          userId,
+          currentDocId,
+          refinedIdea: data.refined_idea,
+          subCategory: data.sub_category,
+        });
+        
+        try {
+          await WorkspaceStore.update(userId, currentDocId, {
+            idea,
+            refinedIdea: data.refined_idea,
+            subCategory: data.sub_category,
+            expansions: data.expansions,
+            actionSteps: data.action_steps,
+            structureType: data.structure_type || null,
+          });
+          console.log("✅ Refined idea saved successfully!");
+        } catch (saveError) {
+          console.error("❌ Error saving refined idea to Firestore:", saveError);
+          Alert.alert("Save Error", `Failed to save refined idea: ${saveError}`);
+        }
+        
+        await ActivityStore.log(userId, {
+          ideaId: currentDocId,
+          ideaTitle: idea.slice(0, 50),
+          action: "refined",
+        });
+      } else {
+        console.warn("⚠️ No ideaDocId available to save AI results");
+      }
+    } catch (err) {
+      console.error("Refine error:", err);
+      Alert.alert(
+        "Error",
+        "Failed to refine idea. Please check backend connection.",
+      );
+    } finally {
+      setLoading(false);
     }
-  } catch (err) {
-    console.error("Refine error:", err);
-    Alert.alert(
-      "Error",
-      "Failed to refine idea. Please check backend connection."
-    );
-  } finally {
-    setLoading(false);
-  }
-};
-
+  };
 
   const handleChatSend = async () => {
     const text = chatInput.trim();
@@ -197,18 +323,24 @@ export default function WorkspaceScreen() {
       // Save both messages to Firestore
       const docId = ideaDocIdRef.current;
       if (docId) {
-        await ChatStore.addMessage(docId, userMsg);
-        await ChatStore.addMessage(docId, assistantMsg);
+        await ChatStore.addMessage(userId, docId, userMsg);
+        await ChatStore.addMessage(userId, docId, assistantMsg);
       }
     } catch (err) {
       console.error("Chat error:", err);
       setChatMessages((prev) => [
         ...prev,
-        { role: "assistant", content: "Sorry, something went wrong. Please try again." },
+        {
+          role: "assistant",
+          content: "Sorry, something went wrong. Please try again.",
+        },
       ]);
     } finally {
       setChatLoading(false);
-      setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 100);
+      setTimeout(
+        () => chatScrollRef.current?.scrollToEnd({ animated: true }),
+        100,
+      );
     }
   };
 
@@ -217,7 +349,6 @@ export default function WorkspaceScreen() {
       colors={["#070A12", "#0A1020", "#070A12"]}
       style={styles.container}
     >
-    
       <View style={styles.header}>
         <Pressable onPress={() => router.back()}>
           <Text style={styles.back}>← Back</Text>
@@ -229,10 +360,11 @@ export default function WorkspaceScreen() {
       </View>
 
       <ScrollView
+        ref={mainScrollRef}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={[styles.content, { paddingBottom: keyboardPadding + 60 }]}
       >
-    
         <Text style={styles.label}>Idea</Text>
         <TextInput
           value={idea}
@@ -243,26 +375,53 @@ export default function WorkspaceScreen() {
           style={styles.ideaInput}
         />
 
-    
         <View style={styles.notesHeader}>
           <Text style={styles.label}>Notes</Text>
-          <Text style={styles.wordCount}>{notesWordCount}/1000 words</Text>
+          <Text style={styles.wordCount}>{notes.length} note(s)</Text>
         </View>
 
-        <TextInput
-          value={notes}
-          onChangeText={(text) => {
-            if (text.split(/\s+/).length <= 1000) {
-              setNotes(text);
-            }
-          }}
-          placeholder="Write your thoughts, drafts, links, or ideas here…"
-          placeholderTextColor="rgba(234,240,255,0.35)"
-          multiline
-          style={styles.notesInput}
-        />
+        <View style={styles.notesInputContainer}>
+          <TextInput
+            value={newNoteText}
+            onChangeText={setNewNoteText}
+            placeholder="Write a note…"
+            placeholderTextColor="rgba(234,240,255,0.35)"
+            multiline
+            style={styles.noteInputField}
+          />
+          <Pressable
+            onPress={handleAddNote}
+            disabled={notesLoading || !newNoteText.trim()}
+            style={({ pressed }) => [
+              styles.addNoteButton,
+              pressed && { opacity: 0.7 },
+              (notesLoading || !newNoteText.trim()) && { opacity: 0.4 },
+            ]}
+          >
+            {notesLoading ? (
+              <ActivityIndicator size="small" color="#0A1020" />
+            ) : (
+              <Text style={styles.addNoteText}>+</Text>
+            )}
+          </Pressable>
+        </View>
 
-        
+        {notes.length > 0 && (
+          <View style={styles.notesList}>
+            {notes.map((note) => (
+              <View key={note.id} style={styles.noteCard}>
+                <Text style={styles.noteContent}>{note.content}</Text>
+                <Pressable
+                  onPress={() => handleDeleteNote(note.id!)}
+                  style={styles.deleteNoteButton}
+                >
+                  <Text style={styles.deleteNoteText}>×</Text>
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        )}
+
         <Pressable
           onPress={handleRefine}
           disabled={loading}
@@ -279,7 +438,6 @@ export default function WorkspaceScreen() {
           )}
         </Pressable>
 
-    
         {aiResult && (
           <View style={styles.aiSection}>
             <Text style={styles.aiTitle}>Refined Idea</Text>
@@ -307,21 +465,25 @@ export default function WorkspaceScreen() {
 
         {/* Chatbot Section */}
         <View style={styles.chatSection}>
-          <Text style={styles.chatSectionTitle}>💬 Chat with AI about your idea</Text>
+          <Text style={styles.chatSectionTitle}>
+            💬 Chat with AI about your idea
+          </Text>
 
           <View style={styles.chatContainer}>
             <ScrollView
               ref={chatScrollRef}
               style={styles.chatMessages}
               contentContainerStyle={styles.chatMessagesContent}
+              nestedScrollEnabled={true}
+              showsVerticalScrollIndicator={true}
               onContentSizeChange={() =>
                 chatScrollRef.current?.scrollToEnd({ animated: true })
               }
             >
               {chatMessages.length === 0 && (
                 <Text style={styles.chatPlaceholder}>
-                  Ask anything about your idea — brainstorm, explore challenges, get
-                  feedback, or dive deeper.
+                  Ask anything about your idea — brainstorm, explore challenges,
+                  get feedback, or dive deeper.
                 </Text>
               )}
               {chatMessages.map((msg, i) => (
@@ -381,7 +543,6 @@ export default function WorkspaceScreen() {
   );
 }
 
-
 const styles = StyleSheet.create({
   container: { flex: 1 },
 
@@ -434,18 +595,65 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginBottom: 12,
   },
   wordCount: {
     color: "rgba(234,240,255,0.4)",
     fontSize: 12,
   },
-  notesInput: {
+  notesInputContainer: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 16,
+  },
+  noteInputField: {
+    flex: 1,
     backgroundColor: "rgba(255,255,255,0.04)",
     borderRadius: 14,
-    padding: 16,
+    padding: 12,
     color: "#EAF0FF",
-    minHeight: 180,
+    minHeight: 50,
+    maxHeight: 100,
+  },
+  addNoteButton: {
+    backgroundColor: "#6D5EF6",
+    borderRadius: 14,
+    width: 50,
+    height: 50,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  addNoteText: {
+    color: "#0A1020",
+    fontSize: 28,
+    fontWeight: "bold",
+  },
+  notesList: {
+    gap: 10,
     marginBottom: 24,
+  },
+  noteCard: {
+    backgroundColor: "rgba(255,255,255,0.05)",
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+  },
+  noteContent: {
+    flex: 1,
+    color: "#EAF0FF",
+    fontSize: 14,
+    lineHeight: 20,
+    marginRight: 8,
+  },
+  deleteNoteButton: {
+    padding: 4,
+  },
+  deleteNoteText: {
+    color: "rgba(234,240,255,0.5)",
+    fontSize: 24,
+    fontWeight: "bold",
   },
 
   refineButton: {
@@ -510,7 +718,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   chatMessages: {
-    maxHeight: 350,
+    maxHeight: 500,
     minHeight: 120,
   },
   chatMessagesContent: {

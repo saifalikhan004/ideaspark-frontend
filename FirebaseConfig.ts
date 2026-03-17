@@ -16,6 +16,13 @@ const firebaseConfig = {
   measurementId: "G-D0ZXX9B3EE"
 };
 
+// @ts-ignore - TS might complain about this in some Firebase versions, but it's correct at runtime
+import { initializeAuth, getReactNativePersistence } from "firebase/auth";
+import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const firestoreDB = getFirestore(app);
+export const firebaseAuth = initializeAuth(app, {
+  persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+});

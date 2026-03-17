@@ -1,15 +1,14 @@
+import { useAuth, useUser } from "@clerk/clerk-expo";
+import { LinearGradient } from "expo-linear-gradient";
+import { usePathname, useRouter } from "expo-router";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, usePathname } from "expo-router";
-import { useAuth, useUser } from "@clerk/clerk-expo";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { firestoreDB } from "../../FirebaseConfig";
 
-import { WorkspaceStore, Workspace } from "../../storage/workspaceStore";
+import { Workspace, WorkspaceStore } from "../../storage/workspaceStore";
 
 export default function HomeScreen() {
-  
   const { signOut } = useAuth();
   const { user } = useUser();
   const router = useRouter();
@@ -24,7 +23,7 @@ export default function HomeScreen() {
 
     // Ensure user doc exists in Firestore
     const userRef = doc(firestoreDB, "users", user.id);
-    setDoc(
+    void setDoc(
       userRef,
       {
         username: user.username || user.firstName || "",
@@ -32,13 +31,26 @@ export default function HomeScreen() {
         updatedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
       },
-      { merge: true }
-    );
-
-    WorkspaceStore.count(user.id).then(setIdeaCount);
-    WorkspaceStore.getAll(user.id).then((all) => {
-      setRecent(all.slice(0, 3));
+      { merge: true },
+    ).catch((error) => {
+      console.error("User profile sync error:", error);
     });
+
+    WorkspaceStore.count(user.id)
+      .then(setIdeaCount)
+      .catch((error) => {
+        console.error("Idea count load error:", error);
+        setIdeaCount(0);
+      });
+
+    WorkspaceStore.getAll(user.id)
+      .then((all) => {
+        setRecent(all.slice(0, 3));
+      })
+      .catch((error) => {
+        console.error("Recent ideas load error:", error);
+        setRecent([]);
+      });
   }, [pathname, user?.id]);
 
   const handleSignOut = async () => {
@@ -106,7 +118,6 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-      
         <Text style={styles.sectionTitle}>Recent Activity</Text>
         {recent.length === 0 ? (
           <View style={styles.emptyCard}>
@@ -134,31 +145,27 @@ export default function HomeScreen() {
           ))
         )}
 
-        
         <Text style={styles.sectionTitle}>CATEGORIES</Text>
         <View style={styles.actionGrid}>
-          {["Startup", "Research", "Content Creation", "Growth"].map(
-            (cat) => (
-              <Pressable
-                key={cat}
-                style={styles.actionCard}
-                onPress={() =>
-                  router.push({
-                    pathname: "/workspace" as any,
-                    params: { idea: "", category: cat },
-                  })
-                }
-              >
-                <Text style={styles.actionText}>{cat}</Text>
-              </Pressable>
-            )
-          )}
+          {["Startup", "Research", "Content Creation", "Growth"].map((cat) => (
+            <Pressable
+              key={cat}
+              style={styles.actionCard}
+              onPress={() =>
+                router.push({
+                  pathname: "/workspace" as any,
+                  params: { idea: "", category: cat },
+                })
+              }
+            >
+              <Text style={styles.actionText}>{cat}</Text>
+            </Pressable>
+          ))}
         </View>
       </ScrollView>
     </LinearGradient>
   );
 }
-
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
@@ -265,7 +272,7 @@ const styles = StyleSheet.create({
     width: "100%",
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     backgroundColor: "rgba(255,255,255,0.06)",
     borderWidth: 1,
     borderColor: "rgba(253, 251, 242, 0.15)",
@@ -273,15 +280,24 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingHorizontal: 16,
     marginBottom: 10,
+    minHeight: 60,
   },
   recentStripTitle: {
     fontSize: 14,
     fontWeight: "600",
     color: "#EAF0FF",
+    flex: 1,
+    marginRight: 12,
+    flexWrap: "wrap",
   },
   recentStripCategory: {
     fontSize: 12,
     color: "rgba(234,240,255,0.45)",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: "rgba(109,94,246,0.15)",
+    borderRadius: 8,
+    flexShrink: 0,
   },
   emptyCard: {
     backgroundColor: "rgba(255,255,255,0.04)",
