@@ -1,6 +1,9 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { initializeAuth } from "firebase/auth";
+import { Platform } from "react-native";
+
 // TODO: Add SDKs for Firebase products that you want to use
 // https://firebase.google.com/docs/web/setup#available-libraries
 
@@ -16,13 +19,23 @@ const firebaseConfig = {
   measurementId: "G-D0ZXX9B3EE"
 };
 
-// @ts-ignore - TS might complain about this in some Firebase versions, but it's correct at runtime
-import { initializeAuth, getReactNativePersistence } from "firebase/auth";
-import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
-
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const firestoreDB = getFirestore(app);
+
+// Configure auth persistence based on platform
+let authPersistence: any = undefined;
+
+if (Platform.OS === "web") {
+  // Web uses browser local storage - import dynamically
+  authPersistence = undefined; // Firebase will use default for web
+} else {
+  // React Native uses AsyncStorage
+  const { getReactNativePersistence } = require("firebase/auth");
+  const AsyncStorage = require("@react-native-async-storage/async-storage").default;
+  authPersistence = getReactNativePersistence(AsyncStorage);
+}
+
 export const firebaseAuth = initializeAuth(app, {
-  persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+  persistence: authPersistence
 });

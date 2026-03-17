@@ -8,8 +8,7 @@
     "scheme": "ideasparkfrontend",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true,
-      "deploymentTarget": "15.1"
+      "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
