@@ -1,7 +1,12 @@
 import { useUser } from "@clerk/clerk-expo";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -12,17 +17,15 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
 } from "react-native";
 import { ActivityStore } from "../storage/activityStore";
 import { ChatStore } from "../storage/chatStore";
+import { Note, NotesStore } from "../storage/notesStore";
 import { WorkspaceStore } from "../storage/workspaceStore";
-import { NotesStore, Note } from "../storage/notesStore";
 
 const BACKEND_URL =
-  Platform.OS === "android"
-    ? "http://192.168.31.195:8000"
-    : "http://localhost:8000";
+  process.env.EXPO_PUBLIC_BACKEND_URL || "http://localhost:8000";
 
 type AIResult = {
   refined_idea: string;
@@ -74,12 +77,15 @@ export default function WorkspaceScreen() {
       (e) => {
         setKeyboardPadding(e.endCoordinates.height);
         // Scroll main view to bottom so chat input is visible
-        setTimeout(() => mainScrollRef.current?.scrollToEnd({ animated: true }), 150);
-      }
+        setTimeout(
+          () => mainScrollRef.current?.scrollToEnd({ animated: true }),
+          150,
+        );
+      },
     );
     const hideSub = Keyboard.addListener(
       Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide",
-      () => setKeyboardPadding(0)
+      () => setKeyboardPadding(0),
     );
     return () => {
       showSub.remove();
@@ -95,14 +101,14 @@ export default function WorkspaceScreen() {
           // Reopening existing idea — load chat history, notes, and AI results
           setIdeaDocId(existingId);
           ideaDocIdRef.current = existingId;
-          
+
           // Load full idea document including refined idea, expansions, action steps
           const ideaData = await WorkspaceStore.get(userId, existingId);
           if (ideaData) {
             console.log("📖 Loaded existing idea:", ideaData);
             // Set idea text
             setIdea(ideaData.idea || "");
-            
+
             // Set AI results if they exist
             if (ideaData.refinedIdea) {
               setAiResult({
@@ -115,13 +121,13 @@ export default function WorkspaceScreen() {
               console.log("✅ AI results loaded");
             }
           }
-          
+
           // Load chat history
           const msgs = await ChatStore.getMessages(userId, existingId);
           setChatMessages(
             msgs.map((m) => ({ role: m.role, content: m.content })),
           );
-          
+
           // Load notes
           setNotesLoading(true);
           const notesList = await NotesStore.getNotes(userId, existingId);
@@ -240,24 +246,14 @@ export default function WorkspaceScreen() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        throw new Error(text || "Failed to refine idea");
+        throw new Error("Server error");
       }
 
       const data = await res.json();
-
       setAiResult(data);
 
-      // Save AI results to Firestore — wait for docId if init hasn't finished
       const currentDocId = await waitForDocId();
       if (currentDocId) {
-        console.log("Saving refined idea to Firestore...", {
-          userId,
-          currentDocId,
-          refinedIdea: data.refined_idea,
-          subCategory: data.sub_category,
-        });
-        
         try {
           await WorkspaceStore.update(userId, currentDocId, {
             idea,
@@ -267,26 +263,23 @@ export default function WorkspaceScreen() {
             actionSteps: data.action_steps,
             structureType: data.structure_type || null,
           });
-          console.log("✅ Refined idea saved successfully!");
         } catch (saveError) {
-          console.error("❌ Error saving refined idea to Firestore:", saveError);
-          Alert.alert("Save Error", `Failed to save refined idea: ${saveError}`);
+          console.error("Save error:", saveError);
         }
-        
+
         await ActivityStore.log(userId, {
           ideaId: currentDocId,
           ideaTitle: idea.slice(0, 50),
           action: "refined",
         });
-      } else {
-        console.warn("⚠️ No ideaDocId available to save AI results");
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Refine error:", err);
-      Alert.alert(
-        "Error",
-        "Failed to refine idea. Please check backend connection.",
-      );
+      let msg = "Failed to refine idea. Please try again.";
+      if (err.message?.includes("Network request failed") || !err.message) {
+        msg = `Could not connect to the AI server. Is the backend running at ${BACKEND_URL}?`;
+      }
+      Alert.alert("Refinement Failed", msg);
     } finally {
       setLoading(false);
     }
@@ -363,7 +356,10 @@ export default function WorkspaceScreen() {
         ref={mainScrollRef}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        contentContainerStyle={[styles.content, { paddingBottom: keyboardPadding + 60 }]}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: keyboardPadding + 60 },
+        ]}
       >
         <Text style={styles.label}>Idea</Text>
         <TextInput

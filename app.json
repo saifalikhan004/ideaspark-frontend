@@ -32,7 +32,8 @@
         {
           "android": {
             "usesCleartextTraffic": true,
-            "enableProguardInReleaseBuilds": true
+            "enableProguardInReleaseBuilds": true,
+            "enableMinifyInReleaseBuilds": true
           },
           "ios": {
             "deploymentTarget": "15.1"
@@ -59,7 +60,7 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "773e81e9-d62a-44ee-9b79-5d4e5d4b3814"
+        "projectId": "7baddcce-7576-4cf5-b9dd-085f3c9223f8"
       }
     },
     "owner": "saifalikhan541"

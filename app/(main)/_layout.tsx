@@ -1,13 +1,54 @@
 import { useAuth } from "@clerk/clerk-expo";
-import { Redirect, Stack } from "expo-router";
-import { Tabs } from "expo-router";
-import { Text } from "react-native";
+import { Redirect, Tabs } from "expo-router";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Text, View } from "react-native";
+import { useFirebaseAuth } from "../../hooks/useFirebaseAuth";
 
 export default function MainLayout() {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, isLoaded: clerkLoaded } = useAuth();
+  const { isFirebaseReady, authError } = useFirebaseAuth();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    // Wait for both services to be ready
+    if (clerkLoaded && isFirebaseReady) {
+      console.log(
+        `[Main Layout] Ready - isSignedIn: ${isSignedIn}, authError: ${authError}`,
+      );
+      setReady(true);
+    }
+  }, [clerkLoaded, isFirebaseReady, isSignedIn, authError]);
+
+  if (!clerkLoaded || !isFirebaseReady || !ready) {
+    console.log(
+      `[Main Layout] Waiting... Clerk: ${clerkLoaded}, Firebase: ${isFirebaseReady}`,
+    );
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: "#070A12",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <ActivityIndicator size="large" color="#6D5EF6" />
+      </View>
+    );
+  }
 
   if (!isSignedIn) {
+    console.log("[Main Layout] User not signed in, redirecting to auth...");
     return <Redirect href={"/(auth)/login" as any} />;
+  }
+
+  // User is signed in but Firebase auth failed - show error but allow access
+  if (authError) {
+    console.warn(
+      "[Main Layout] Firebase auth had error but proceeding:",
+      authError,
+    );
+    // Continue anyway - Firestore operations will handle the error
   }
 
   return (
@@ -27,7 +68,7 @@ export default function MainLayout() {
         options={{
           title: "Home",
           tabBarIcon: ({ color }) => (
-            <Text style={{ color:"#ffaa00", fontSize: 18 }}>🏠</Text>
+            <Text style={{ color: "#ffaa00", fontSize: 18 }}>🏠</Text>
           ),
         }}
       />

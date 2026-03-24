@@ -2,7 +2,7 @@ import { useAuth, useUser } from "@clerk/clerk-expo";
 import { LinearGradient } from "expo-linear-gradient";
 import { usePathname, useRouter } from "expo-router";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { firestoreDB } from "../../FirebaseConfig";
 
@@ -19,9 +19,14 @@ export default function HomeScreen() {
   const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      console.log("[Home] No user ID available");
+      return;
+    }
 
-    // Ensure user doc exists in Firestore
+    console.log(`[Home] Initializing for user: ${user.id}`);
+
+    // Ensure user doc exists in Firestore (for new users on first login)
     const userRef = doc(firestoreDB, "users", user.id);
     void setDoc(
       userRef,
@@ -33,22 +38,35 @@ export default function HomeScreen() {
       },
       { merge: true },
     ).catch((error) => {
-      console.error("User profile sync error:", error);
+      console.error("[Home] User profile sync error:", error);
+      console.error("[Home] Error code:", error?.code);
+      console.error("[Home] Error message:", error?.message);
+      // Don't stop loading - continue even if this fails
     });
 
+    // Load idea count with detailed error handling
     WorkspaceStore.count(user.id)
-      .then(setIdeaCount)
+      .then((count) => {
+        console.log(`[Home] User has ${count} ideas`);
+        setIdeaCount(count);
+      })
       .catch((error) => {
-        console.error("Idea count load error:", error);
+        console.error("[Home] Idea count load error:", error);
+        console.error("[Home] Error code:", error?.code);
+        console.error("[Home] Error message:", error?.message);
         setIdeaCount(0);
       });
 
-    WorkspaceStore.getAll(user.id)
+    // Load recent ideas with detailed error handling
+    WorkspaceStore.getAll(user.id, 3)
       .then((all) => {
-        setRecent(all.slice(0, 3));
+        console.log(`[Home] Loaded ${all.length} recent ideas`);
+        setRecent(all);
       })
       .catch((error) => {
-        console.error("Recent ideas load error:", error);
+        console.error("[Home] Recent ideas load error:", error);
+        console.error("[Home] Error code:", error?.code);
+        console.error("[Home] Error message:", error?.message);
         setRecent([]);
       });
   }, [pathname, user?.id]);
@@ -56,11 +74,14 @@ export default function HomeScreen() {
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
+      console.log("[Auth] Starting sign out process...");
       await signOut();
+      console.log("[Auth] Successfully signed out from Clerk");
+      // Give auth state time to update before navigation
+      await new Promise((resolve) => setTimeout(resolve, 500));
       router.replace("/(auth)/login" as any);
     } catch (err) {
-      console.error("Sign out error:", err);
-    } finally {
+      console.error("[Auth] Sign out error:", err);
       setSigningOut(false);
     }
   };
@@ -96,25 +117,33 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Stats */}
+        {/* own idea stats cards */}
         <View style={styles.statsRow}>
-          <View style={styles.statCard1}>
-            <Text style={styles.statNumber}>{ideaCount}</Text>
-            <Text style={styles.statLabel1}>Ideas</Text>
+          <View style={styles.countCard}>
+            <View style={styles.countCircle}>
+              <Text style={styles.countNumber}>{ideaCount}</Text>
+            </View>
+            <Text style={styles.countLabel}>total ideas</Text>
           </View>
 
           <Pressable
+            style={{ flex: 1 }}
             onPress={() =>
               router.push({
-                pathname: "/workspace" as any,
+                pathname: "/workspace",
                 params: { idea: "", category: "General" },
               })
             }
           >
-            <View style={styles.statCard2}>
-              <Text style={styles.statNumber}>+</Text>
-              <Text style={styles.statLabel2}>HAVE AN IDEA</Text>
-            </View>
+            <LinearGradient
+              colors={["#ffaa00", "#f8d800"]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.addCard}
+            >
+              <Text style={styles.addIcon}>+</Text>
+              <Text style={styles.addLabel}>NEW IDEA</Text>
+            </LinearGradient>
           </Pressable>
         </View>
 
@@ -130,7 +159,7 @@ export default function HomeScreen() {
               style={styles.recentStrip}
               onPress={() =>
                 router.push({
-                  pathname: "/workspace" as any,
+                  pathname: "/workspace",
                   params: {
                     idea: item.idea,
                     category: item.category,
@@ -153,7 +182,7 @@ export default function HomeScreen() {
               style={styles.actionCard}
               onPress={() =>
                 router.push({
-                  pathname: "/workspace" as any,
+                  pathname: "/workspace",
                   params: { idea: "", category: cat },
                 })
               }
@@ -207,41 +236,63 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: "row",
-    gap: 20,
-    marginBottom: 28,
+    gap: 16,
+    marginBottom: 32,
   },
-  statCard1: {
-    width: 100,
-    height: 100,
-    backgroundColor: "rgba(255,255,255,0.06)",
+  countCard: {
+    flex: 0.8,
+    backgroundColor: "rgba(255,255,255,0.04)",
     borderWidth: 1,
-    borderColor: "rgba(109,94,246,0.2)",
-    borderRadius: 16,
+    borderColor: "rgba(109,94,246,0.15)",
+    borderRadius: 24,
+    padding: 16,
     alignItems: "center",
     justifyContent: "center",
   },
-  statCard2: {
-    height: 100,
-    backgroundColor: "#ffaa00",
-    borderRadius: 16,
+  countCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(109,94,246,0.1)",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 20,
+    marginBottom: 8,
   },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: "700",
+  countNumber: {
+    fontSize: 20,
+    fontWeight: "800",
     color: "#6D5EF6",
   },
-  statLabel1: {
-    fontSize: 18,
-    color: "#EAF0FF",
-    marginTop: 4,
+  countLabel: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "rgba(234,240,255,0.4)",
+    textTransform: "uppercase",
   },
-  statLabel2: {
-    fontSize: 18,
+  addCard: {
+    flex: 1,
+    height: "100%",
+    borderRadius: 24,
+    padding: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    elevation: 4,
+    shadowColor: "#ffaa00",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  addIcon: {
+    fontSize: 32,
+    fontWeight: "300",
     color: "#080808",
-    marginTop: 4,
+    marginBottom: -4,
+  },
+  addLabel: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: "#080808",
+    letterSpacing: 1,
   },
   sectionTitle: {
     fontSize: 17,

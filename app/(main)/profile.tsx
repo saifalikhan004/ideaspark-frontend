@@ -3,11 +3,11 @@ import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import React from "react";
 import {
-  ActivityIndicator,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
+    ActivityIndicator,
+    Pressable,
+    StyleSheet,
+    Text,
+    View,
 } from "react-native";
 
 export default function ProfileScreen() {
@@ -19,11 +19,14 @@ export default function ProfileScreen() {
   const handleSignOut = async () => {
     setSigningOut(true);
     try {
+      console.log("[Auth] Starting sign out process...");
       await signOut();
+      console.log("[Auth] Successfully signed out from Clerk");
+      // Give auth state time to update before navigation
+      await new Promise((resolve) => setTimeout(resolve, 500));
       router.replace("/(auth)/login" as any);
     } catch (err) {
-      console.error("Sign out error:", err);
-    } finally {
+      console.error("[Auth] Sign out error:", err);
       setSigningOut(false);
     }
   };

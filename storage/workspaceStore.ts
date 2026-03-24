@@ -4,8 +4,10 @@ import {
   setDoc,
   getDocs,
   getDoc,
+  deleteDoc,
   query,
   orderBy,
+  limit,
   serverTimestamp,
 } from "firebase/firestore";
 import { firestoreDB } from "../FirebaseConfig";
@@ -30,12 +32,15 @@ export type Workspace = {
 const userIdeasCol = (userId: string) =>
   collection(firestoreDB, "users", userId, "ideas");
 
-const userIdeasQuery = (userId: string) =>
-  query(userIdeasCol(userId), orderBy("updatedAt", "desc"));
+const userIdeasQuery = (userId: string, limitCount?: number) => {
+  const constraints = [orderBy("updatedAt", "desc")];
+  if (limitCount) constraints.push(limit(limitCount));
+  return query(userIdeasCol(userId), ...constraints);
+};
 
 export const WorkspaceStore = {
-  async getAll(userId: string): Promise<Workspace[]> {
-    const q = userIdeasQuery(userId);
+  async getAll(userId: string, limitCount?: number): Promise<Workspace[]> {
+    const q = userIdeasQuery(userId, limitCount);
     const snap = await getDocs(q);
     return snap.docs.map((d) => ({ id: d.id, ...d.data() } as Workspace));
   },
@@ -73,5 +78,10 @@ export const WorkspaceStore = {
   async update(userId: string, ideaId: string, data: Partial<Workspace>) {
     const ref = doc(firestoreDB, "users", userId, "ideas", ideaId);
     await setDoc(ref, { ...data, updatedAt: serverTimestamp() }, { merge: true });
+  },
+
+  async delete(userId: string, ideaId: string) {
+    const ref = doc(firestoreDB, "users", userId, "ideas", ideaId);
+    await deleteDoc(ref);
   },
 };
