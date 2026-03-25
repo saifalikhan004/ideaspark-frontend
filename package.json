@@ -57,7 +57,8 @@
   },
   "overrides": {
     "utf-8-validate": "6.0.6",
-    "bufferutil": "4.1.0"
+    "bufferutil": "4.1.0",
+    "react-native-renderer": "19.1.4"
   },
   "private": true
 }
